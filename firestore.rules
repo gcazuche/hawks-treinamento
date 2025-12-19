@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isApproved() {
+      return isAuthenticated() && getUserData().approved == true;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserData().role == 'admin' && getUserData().approved == true;
+    }
+    
+    function isAssignedTo(cardData) {
+      return request.auth.uid == cardData.assignedTo;
+    }
+    
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() 
+                    && request.auth.uid == userId
+                    && request.resource.data.approved == false
+                    && request.resource.data.role == 'user';
+      
+      allow update: if isAdmin() 
+                    || (isAuthenticated() 
+                        && request.auth.uid == userId
+                        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['approved', 'role']));
+      
+      allow delete: if isAdmin();
+    }
+    
+    match /cards/{cardId} {
+      allow read: if isApproved();
+      
+      allow create: if isAdmin()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.keys().hasAll(['title', 'column', 'assignedTo', 'label', 'done', 'createdBy', 'createdAt']);
+      
+      allow update: if isAdmin()
+                    || (isApproved() 
+                        && isAssignedTo(resource.data)
+                        && onlyAllowedFieldsChanged());
+      
+      allow delete: if isAdmin();
+      
+      function onlyAllowedFieldsChanged() {
+        let allowedFields = ['label', 'done', 'column', 'attachments', 'updatedAt'];
+        let changedFields = request.resource.data.diff(resource.data).affectedKeys();
+        
+        let columnChangeValid = !changedFields.hasAny(['column']) 
+                                || (request.resource.data.column == 'concluido' && request.resource.data.done == true);
+        
+        return changedFields.hasOnly(allowedFields) && columnChangeValid;
+      }
+    }
+    
+    match /history/{historyId} {
+      allow read: if isApproved();
+      allow create: if isApproved();
+      allow update, delete: if false; // Histórico é imutável
+    }
+  }
+}
