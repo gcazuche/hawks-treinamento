@@ -15,7 +15,11 @@ service cloud.firestore {
     }
     
     function isAdmin() {
-      return isAuthenticated() && getUserData().role == 'admin' && getUserData().approved == true;
+      return isAuthenticated() && (getUserData().role == 'admin' || getUserData().role == 'creator') && getUserData().approved == true;
+    }
+    
+    function isCreator() {
+      return isAuthenticated() && getUserData().role == 'creator' && getUserData().approved == true;
     }
     
     function isAssignedTo(cardData) {
@@ -27,8 +31,8 @@ service cloud.firestore {
       
       allow create: if isAuthenticated() 
                     && request.auth.uid == userId
-                    && request.resource.data.approved == false
-                    && request.resource.data.role == 'user';
+                    && (request.resource.data.approved == false || request.resource.data.role == 'creator')
+                    && (request.resource.data.role == 'user' || request.resource.data.role == 'creator');
       
       allow update: if isAdmin() 
                     || (isAuthenticated() 
@@ -66,8 +70,7 @@ service cloud.firestore {
     match /history/{historyId} {
       allow read: if isApproved();
       allow create: if isApproved();
-      allow update, delete: if false;
+      allow update, delete: if false; 
     }
   }
-
 }
