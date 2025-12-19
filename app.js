@@ -240,7 +240,8 @@ function renderPending() {
 }
 
 function renderKanban() {
-  const isAdmin = state.userData?.role === "admin";
+  const isAdmin =
+    state.userData?.role === "admin" || state.userData?.role === "creator";
   return `
         <div class="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black">
             <header class="bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 sticky top-0 z-40">
@@ -427,6 +428,11 @@ function renderKanban() {
                     </form>
                 </div>
             </div>
+            <div id="editCardModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-[55] hidden items-center justify-center p-4 overflow-y-auto">
+                <div class="bg-gray-900 rounded-2xl w-full max-w-lg border border-gray-800 my-8">
+                    <div id="editCardModalContent" class="p-6 max-h-[85vh] overflow-y-auto scrollbar-thin"></div>
+                </div>
+            </div>
         </div>
     `;
 }
@@ -472,20 +478,28 @@ function renderCard(card, columnId) {
   const totalAttachments =
     (card.initialAttachments?.length || 0) +
     (card.userAttachments?.length || 0);
+  const isCompleted = columnId === "concluido";
 
   return `
         <div onclick="openCardModal('${
           card.id
         }')" class="bg-gray-800 rounded-lg p-3 cursor-pointer hover:bg-gray-750 transition border border-gray-700 hover:border-red-500/50 card-shadow fade-in ${
     late ? "border-l-4 border-l-red-500" : ""
-  }">
+  } ${isCompleted ? "border-l-4 border-l-green-500" : ""}">
             <div class="flex items-start justify-between mb-2">
                 <div class="flex flex-wrap gap-1">
-                    <span class="${
-                      label.color
-                    } text-xs font-medium px-2 py-0.5 rounded text-white">${
-    label.name
-  }</span>
+                    ${
+                      isCompleted
+                        ? `
+                        <span class="bg-green-500 text-xs font-medium px-2 py-0.5 rounded text-white flex items-center">
+                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            Concluído
+                        </span>
+                    `
+                        : `<span class="${label.color} text-xs font-medium px-2 py-0.5 rounded text-white">${label.name}</span>`
+                    }
                     ${
                       columnId === "mecanica" && tipoMecanica
                         ? `<span class="${tipoMecanica.color} text-xs font-medium px-2 py-0.5 rounded text-white">${tipoMecanica.name}</span>`
@@ -565,35 +579,50 @@ function renderCardModalContent(card) {
   const label = LABELS.find((l) => l.id === card.label) || LABELS[0];
   const tipoMecanica = TIPOS_MECANICA.find((t) => t.id === card.tipoMecanica);
   const isAssigned = (card.assignedTo || []).includes(state.user?.uid);
-  const isAdmin = state.userData?.role === "admin";
+  const isAdmin =
+    state.userData?.role === "admin" || state.userData?.role === "creator";
   const canEdit = isAssigned || isAdmin;
   const late = card.column !== "concluido" && isLate(card.deadline);
   const initialAttachments = card.initialAttachments || [];
   const userAttachments = card.userAttachments || [];
+  const isCompleted = card.column === "concluido";
 
   return `
         <div class="relative">
             <div class="bg-red-600 h-2"></div>
-            <button onclick="closeCardModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
+            <div class="absolute top-4 right-4 flex items-center space-x-2 z-10">
+                ${
+                  isAdmin && !isCompleted
+                    ? `
+                    <button onclick="openEditCardModal('${card.id}')" class="text-gray-400 hover:text-white" title="Editar">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                    </button>
+                `
+                    : ""
+                }
+                <button onclick="closeCardModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
             <div class="p-6 overflow-y-auto max-h-[calc(90vh-8px)] scrollbar-thin">
                 <div class="mb-4">
                     <div class="flex flex-wrap gap-2 mb-3">
-                        <span class="${
-                          label.color
-                        } text-xs font-medium px-2 py-1 rounded text-white">${
-    label.name
-  }</span>
+                        ${
+                          !isCompleted
+                            ? `<span class="${label.color} text-xs font-medium px-2 py-1 rounded text-white">${label.name}</span>`
+                            : ""
+                        }
                         ${
                           card.column === "mecanica" && tipoMecanica
                             ? `<span class="${tipoMecanica.color} text-xs font-medium px-2 py-1 rounded text-white">${tipoMecanica.name}</span>`
                             : ""
                         }
                         ${
-                          card.column === "concluido"
+                          isCompleted
                             ? `
                             <span class="bg-green-500 text-white text-xs font-medium px-2 py-1 rounded flex items-center">
                                 <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -858,8 +887,38 @@ function renderAttachment(att) {
 }
 
 function renderAdmin() {
+  const isCreator = state.userData?.role === "creator";
   const pendingUsers = state.users.filter((u) => !u.approved);
-  const approvedUsers = state.users.filter((u) => u.approved);
+  const approvedUsers = state.users.filter(
+    (u) => u.approved && u.role !== "creator"
+  );
+
+  const canManageUser = (user) => {
+    if (isCreator) return true;
+    if (user.role === "admin" || user.role === "creator") return false;
+    return true;
+  };
+
+  const getDisplayRole = (role) => {
+    if (role === "creator") return "admin";
+    return role;
+  };
+
+  const getRoleOptions = (user) => {
+    if (isCreator) {
+      return `
+                <option value="user" ${
+                  user.role === "user" ? "selected" : ""
+                }>Membro</option>
+                <option value="admin" ${
+                  user.role === "admin" ? "selected" : ""
+                }>Admin</option>
+            `;
+    } else {
+      return `<option value="user" selected>Membro</option>`;
+    }
+  };
+
   return `
         <div class="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black">
             <header class="bg-gray-900/80 backdrop-blur-sm border-b border-gray-800">
@@ -942,65 +1001,74 @@ function renderAdmin() {
                                 </thead>
                                 <tbody class="divide-y divide-gray-800">
                                     ${approvedUsers
-                                      .map(
-                                        (user) => `
-                                        <tr class="hover:bg-gray-800/50 transition">
-                                            <td class="px-4 py-3">
-                                                <div class="flex items-center space-x-3">
-                                                    <div class="w-8 h-8 ${
-                                                      user.role === "admin"
-                                                        ? "bg-red-500/20"
-                                                        : "bg-gray-700"
-                                                    } rounded-full flex items-center justify-center">
-                                                        <span class="${
+                                      .map((user) => {
+                                        const canManage = canManageUser(user);
+                                        const isCurrentUser =
+                                          user.id === state.user?.uid;
+                                        const displayRole =
+                                          user.role === "admin"
+                                            ? "Administrador"
+                                            : "Membro";
+
+                                        return `
+                                            <tr class="hover:bg-gray-800/50 transition">
+                                                <td class="px-4 py-3">
+                                                    <div class="flex items-center space-x-3">
+                                                        <div class="w-8 h-8 ${
                                                           user.role === "admin"
-                                                            ? "text-red-500"
-                                                            : "text-gray-400"
-                                                        } font-bold text-sm">${
+                                                            ? "bg-red-500/20"
+                                                            : "bg-gray-700"
+                                                        } rounded-full flex items-center justify-center">
+                                                            <span class="${
+                                                              user.role ===
+                                                              "admin"
+                                                                ? "text-red-500"
+                                                                : "text-gray-400"
+                                                            } font-bold text-sm">${
                                           user.name?.charAt(0)?.toUpperCase() ||
                                           "?"
                                         }</span>
+                                                        </div>
+                                                        <div>
+                                                            <p class="text-white font-medium text-sm">${
+                                                              user.name
+                                                            }</p>
+                                                            <p class="text-gray-500 text-xs">${
+                                                              user.email
+                                                            }</p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <p class="text-white font-medium text-sm">${
-                                                          user.name
-                                                        }</p>
-                                                        <p class="text-gray-500 text-xs">${
-                                                          user.email
-                                                        }</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <select onchange="updateUserRole('${
-                                                  user.id
-                                                }', this.value)" class="bg-gray-800 border border-gray-700 text-white text-sm rounded px-2 py-1 focus:outline-none focus:border-red-500" ${
-                                          user.id === state.user?.uid
-                                            ? "disabled"
-                                            : ""
-                                        }>
-                                                    <option value="user" ${
-                                                      user.role === "user"
-                                                        ? "selected"
-                                                        : ""
-                                                    }>Membro</option>
-                                                    <option value="admin" ${
-                                                      user.role === "admin"
-                                                        ? "selected"
-                                                        : ""
-                                                    }>Admin</option>
-                                                </select>
-                                            </td>
-                                            <td class="px-4 py-3 text-right">
-                                                ${
-                                                  user.id !== state.user?.uid
-                                                    ? `<button onclick="removeUser('${user.id}')" class="text-red-500 hover:text-red-400 text-sm">Remover</button>`
-                                                    : '<span class="text-gray-500 text-sm">Você</span>'
-                                                }
-                                            </td>
-                                        </tr>
-                                    `
-                                      )
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${
+                                                      canManage &&
+                                                      !isCurrentUser
+                                                        ? `
+                                                        <select onchange="updateUserRole('${
+                                                          user.id
+                                                        }', this.value)" class="bg-gray-800 border border-gray-700 text-white text-sm rounded px-2 py-1 focus:outline-none focus:border-red-500">
+                                                            ${getRoleOptions(
+                                                              user
+                                                            )}
+                                                        </select>
+                                                    `
+                                                        : `
+                                                        <span class="text-gray-400 text-sm">${displayRole}</span>
+                                                    `
+                                                    }
+                                                </td>
+                                                <td class="px-4 py-3 text-right">
+                                                    ${
+                                                      isCurrentUser
+                                                        ? '<span class="text-gray-500 text-sm">Você</span>'
+                                                        : canManage
+                                                        ? `<button onclick="removeUser('${user.id}')" class="text-red-500 hover:text-red-400 text-sm">Remover</button>`
+                                                        : '<span class="text-gray-600 text-sm">-</span>'
+                                                    }
+                                                </td>
+                                            </tr>
+                                        `;
+                                      })
                                       .join("")}
                                 </tbody>
                             </table>
@@ -1081,7 +1149,7 @@ async function handleRegister(e) {
       .set({
         name: name,
         email: email,
-        role: isFirstUser ? "admin" : "user",
+        role: isFirstUser ? "creator" : "user",
         approved: isFirstUser,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
@@ -1203,12 +1271,348 @@ async function markAsDone(cardId) {
     await db.collection("cards").doc(cardId).update({
       done: true,
       column: "concluido",
+      label: null,
       completedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
     closeCardModal();
   } catch (error) {
     alert("Erro ao concluir tarefa.");
+  }
+}
+
+let editCardAttachments = [];
+
+function openEditCardModal(cardId) {
+  const card = state.cards.find((c) => c.id === cardId);
+  if (!card) return;
+  editCardAttachments = [...(card.initialAttachments || [])];
+  closeCardModal();
+  const modal = document.getElementById("editCardModal");
+  const content = document.getElementById("editCardModalContent");
+  content.innerHTML = renderEditCardForm(card);
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  updateEditFormFields(card.column);
+}
+
+function closeEditCardModal() {
+  const modal = document.getElementById("editCardModal");
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  editCardAttachments = [];
+}
+
+function renderEditCardForm(card) {
+  return `
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold text-white">Editar Tarefa</h2>
+            <button onclick="closeEditCardModal()" class="text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <form id="editCardForm" onsubmit="handleEditCard(event, '${
+          card.id
+        }')" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Título *</label>
+                <input type="text" id="editCardTitle" value="${
+                  card.title
+                }" required class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Coluna *</label>
+                    <select id="editCardColumn" required onchange="updateEditFormFields(this.value)" class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition">
+                        ${COLUMNS.filter((c) => c.id !== "concluido")
+                          .map(
+                            (c) =>
+                              `<option value="${c.id}" ${
+                                card.column === c.id ? "selected" : ""
+                              }>${c.name}</option>`
+                          )
+                          .join("")}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Data de Entrega</label>
+                    <input type="datetime-local" id="editCardDeadline" value="${
+                      card.deadline || ""
+                    }" class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition">
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Responsáveis *</label>
+                <div class="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg p-3">
+                    ${state.users
+                      .filter((u) => u.approved)
+                      .map(
+                        (u) => `
+                        <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 p-1 rounded">
+                            <input type="checkbox" name="editAssignees" value="${
+                              u.id
+                            }" ${
+                          (card.assignedTo || []).includes(u.id)
+                            ? "checked"
+                            : ""
+                        } class="w-4 h-4 accent-red-500">
+                            <span class="text-white text-sm truncate">${
+                              u.name
+                            }</span>
+                        </label>
+                    `
+                      )
+                      .join("")}
+                </div>
+            </div>
+            <div id="editAreasField" class="${
+              card.column === "projetos" ? "" : "hidden"
+            }">
+                <label class="block text-sm font-medium text-gray-300 mb-2">Áreas Envolvidas</label>
+                <div class="flex flex-wrap gap-2">
+                    ${AREAS.map(
+                      (area) => `
+                        <label class="flex items-center space-x-2 bg-gray-800 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-700 transition">
+                            <input type="checkbox" name="editAreas" value="${
+                              area.id
+                            }" ${
+                        (card.areasEnvolvidas || []).includes(area.id)
+                          ? "checked"
+                          : ""
+                      } class="w-4 h-4 accent-red-500">
+                            <span class="text-white text-sm">${area.name}</span>
+                        </label>
+                    `
+                    ).join("")}
+                </div>
+            </div>
+            <div id="editTipoMecanicaField" class="${
+              card.column === "mecanica" ? "" : "hidden"
+            }">
+                <label class="block text-sm font-medium text-gray-300 mb-2">Tipo</label>
+                <div class="flex gap-2">
+                    ${TIPOS_MECANICA.map(
+                      (tipo) => `
+                        <label class="flex items-center space-x-2 bg-gray-800 px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-700 transition">
+                            <input type="radio" name="editTipoMecanica" value="${
+                              tipo.id
+                            }" ${
+                        card.tipoMecanica === tipo.id ? "checked" : ""
+                      } class="w-4 h-4 accent-red-500">
+                            <span class="text-white text-sm">${tipo.name}</span>
+                        </label>
+                    `
+                    ).join("")}
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Descrição</label>
+                <textarea id="editCardDescription" rows="3" class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition resize-none">${
+                  card.description || ""
+                }</textarea>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-300 mb-2">Anexos da Tarefa</label>
+                <div class="space-y-2">
+                    <div class="flex gap-2">
+                        <button type="button" onclick="triggerEditFileUpload()" class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            <span>Arquivo</span>
+                        </button>
+                        <button type="button" onclick="openEditLinkModal()" class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition text-sm flex items-center justify-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            <span>Link</span>
+                        </button>
+                    </div>
+                    <input type="file" id="editFileInput" class="hidden" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" onchange="handleEditFileUpload(event)">
+                    <div id="editAttachmentsList" class="space-y-2">
+                        ${renderEditAttachments()}
+                    </div>
+                </div>
+            </div>
+            <div class="flex space-x-3">
+                <button type="button" onclick="closeEditCardModal()" class="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition">Cancelar</button>
+                <button type="submit" class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition">Salvar</button>
+            </div>
+        </form>
+        <div id="editLinkModal" class="fixed inset-0 bg-black/50 z-[70] hidden items-center justify-center">
+            <div class="bg-gray-800 rounded-xl p-6 w-full max-w-md mx-4">
+                <h3 class="text-lg font-bold text-white mb-4">Adicionar Link</h3>
+                <form onsubmit="handleEditAddLink(event)">
+                    <input type="text" id="editLinkName" placeholder="Nome do link" required class="w-full mb-3 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500">
+                    <input type="url" id="editLinkUrl" placeholder="https://..." required class="w-full mb-4 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500">
+                    <div class="flex space-x-3">
+                        <button type="button" onclick="closeEditLinkModal()" class="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg">Cancelar</button>
+                        <button type="submit" class="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg">Adicionar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+}
+
+function updateEditFormFields(column) {
+  const areasField = document.getElementById("editAreasField");
+  const tipoMecanicaField = document.getElementById("editTipoMecanicaField");
+  if (areasField) areasField.classList.toggle("hidden", column !== "projetos");
+  if (tipoMecanicaField)
+    tipoMecanicaField.classList.toggle("hidden", column !== "mecanica");
+}
+
+function renderEditAttachments() {
+  if (editCardAttachments.length === 0)
+    return '<p class="text-gray-500 text-sm">Nenhum anexo</p>';
+  return editCardAttachments
+    .map(
+      (att, idx) => `
+        <div class="flex items-center justify-between bg-gray-800 rounded-lg p-2">
+            <div class="flex items-center space-x-2 min-w-0">
+                ${getAttachmentIcon(att.type)}
+                <span class="text-white text-sm truncate">${att.name}</span>
+            </div>
+            <button type="button" onclick="removeEditAttachment(${idx})" class="text-red-500 hover:text-red-400 flex-shrink-0 ml-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+    `
+    )
+    .join("");
+}
+
+function removeEditAttachment(idx) {
+  editCardAttachments.splice(idx, 1);
+  document.getElementById("editAttachmentsList").innerHTML =
+    renderEditAttachments();
+}
+
+function triggerEditFileUpload() {
+  document.getElementById("editFileInput").click();
+}
+
+async function handleEditFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", cloudinaryConfig.uploadPreset);
+    let resourceType = "auto";
+    if (file.type.startsWith("image/")) resourceType = "image";
+    else if (file.type.startsWith("video/")) resourceType = "video";
+    else resourceType = "raw";
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/${resourceType}/upload`,
+      { method: "POST", body: formData }
+    );
+    const data = await response.json();
+    if (data.secure_url) {
+      editCardAttachments.push({
+        name: file.name,
+        url: data.secure_url,
+        type: file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+          ? "video"
+          : "raw",
+        size: file.size,
+        addedBy: state.user.uid,
+        addedByName: state.userData.name,
+        addedAt: new Date().toISOString(),
+      });
+      document.getElementById("editAttachmentsList").innerHTML =
+        renderEditAttachments();
+    }
+    event.target.value = "";
+  } catch (error) {
+    alert("Erro ao fazer upload.");
+  }
+}
+
+function openEditLinkModal() {
+  const modal = document.getElementById("editLinkModal");
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+}
+
+function closeEditLinkModal() {
+  const modal = document.getElementById("editLinkModal");
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function handleEditAddLink(event) {
+  event.preventDefault();
+  const name = document.getElementById("editLinkName").value;
+  const url = document.getElementById("editLinkUrl").value;
+  editCardAttachments.push({
+    name: name,
+    url: url,
+    type: "link",
+    addedBy: state.user.uid,
+    addedByName: state.userData.name,
+    addedAt: new Date().toISOString(),
+  });
+  document.getElementById("editAttachmentsList").innerHTML =
+    renderEditAttachments();
+  closeEditLinkModal();
+  document.getElementById("editLinkName").value = "";
+  document.getElementById("editLinkUrl").value = "";
+}
+
+async function handleEditCard(event, cardId) {
+  event.preventDefault();
+  const title = document.getElementById("editCardTitle").value;
+  const column = document.getElementById("editCardColumn").value;
+  const deadline = document.getElementById("editCardDeadline").value || null;
+  const description = document.getElementById("editCardDescription").value;
+  const assigneesCheckboxes = document.querySelectorAll(
+    'input[name="editAssignees"]:checked'
+  );
+  const assignedTo = Array.from(assigneesCheckboxes).map((cb) => cb.value);
+  if (assignedTo.length === 0) {
+    alert("Selecione pelo menos um responsável.");
+    return;
+  }
+  const areasCheckboxes = document.querySelectorAll(
+    'input[name="editAreas"]:checked'
+  );
+  const areasEnvolvidas = Array.from(areasCheckboxes).map((cb) => cb.value);
+  const tipoMecanicaRadio = document.querySelector(
+    'input[name="editTipoMecanica"]:checked'
+  );
+  const tipoMecanica = tipoMecanicaRadio?.value || null;
+  try {
+    const updateData = {
+      title: title,
+      column: column,
+      assignedTo: assignedTo,
+      description: description,
+      deadline: deadline,
+      initialAttachments: editCardAttachments,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    if (column === "projetos") {
+      updateData.areasEnvolvidas = areasEnvolvidas;
+    } else {
+      updateData.areasEnvolvidas = firebase.firestore.FieldValue.delete();
+    }
+    if (column === "mecanica") {
+      updateData.tipoMecanica = tipoMecanica;
+    } else {
+      updateData.tipoMecanica = firebase.firestore.FieldValue.delete();
+    }
+    await db.collection("cards").doc(cardId).update(updateData);
+    closeEditCardModal();
+  } catch (error) {
+    alert("Erro ao atualizar tarefa.");
   }
 }
 
@@ -1433,6 +1837,19 @@ async function rejectUser(userId) {
 }
 
 async function updateUserRole(userId, role) {
+  const isCreator = state.userData?.role === "creator";
+  const targetUser = state.users.find((u) => u.id === userId);
+  if (
+    !isCreator &&
+    (targetUser?.role === "admin" || targetUser?.role === "creator")
+  ) {
+    alert("Você não tem permissão para alterar o cargo deste usuário.");
+    return;
+  }
+  if (!isCreator && role === "admin") {
+    alert("Você não tem permissão para promover usuários a administrador.");
+    return;
+  }
   try {
     await db.collection("users").doc(userId).update({ role: role });
   } catch (error) {
@@ -1441,6 +1858,15 @@ async function updateUserRole(userId, role) {
 }
 
 async function removeUser(userId) {
+  const isCreator = state.userData?.role === "creator";
+  const targetUser = state.users.find((u) => u.id === userId);
+  if (
+    !isCreator &&
+    (targetUser?.role === "admin" || targetUser?.role === "creator")
+  ) {
+    alert("Você não tem permissão para remover este usuário.");
+    return;
+  }
   if (!confirm("Remover este usuário?")) return;
   try {
     await db.collection("users").doc(userId).update({ approved: false });
