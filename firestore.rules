@@ -66,7 +66,8 @@ service cloud.firestore {
     match /history/{historyId} {
       allow read: if isApproved();
       allow create: if isApproved();
-      allow update, delete: if false; // Histórico é imutável
+      allow update, delete: if false;
     }
   }
+
 }
