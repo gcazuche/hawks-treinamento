@@ -26,14 +26,189 @@ const state = {
   selectedCard: null,
   unsubscribers: [],
   createCardAttachments: [],
+  searchQuery: "",
+  filters: {
+    assignee: "",
+    label: "",
+    late: false,
+    column: "",
+  },
+  draggedCard: null,
+  theme: localStorage.getItem("theme") || "dark",
+  notifications: [],
+  lastSeenCards: JSON.parse(localStorage.getItem("lastSeenCards") || "{}"),
+  notificationSound: null,
 };
 
+function initNotificationSound() {
+  state.notificationSound = new Audio(
+    "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleTA1telewtV8telexa1sdGiRr0EterYJRIl+o0NC0dDUtHWhq0NC4bjUxGGJq0NC4bjUterYJRI1+wtWvSj1bZprI4Li4bjU1HWZq0dC4bjU1HWRq0dC4brE1"
+  );
+}
+
+function playNotificationSound() {
+  try {
+    if (state.notificationSound) {
+      state.notificationSound.currentTime = 0;
+      state.notificationSound.play().catch(() => {});
+    }
+  } catch (e) {}
+}
+
+function showNotification(title, message, type = "info") {
+  const id = Date.now();
+  const notification = { id, title, message, type };
+  state.notifications.push(notification);
+  renderNotifications();
+  playNotificationSound();
+  setTimeout(() => {
+    removeNotification(id);
+  }, 5000);
+}
+
+function removeNotification(id) {
+  const el = document.getElementById(`notification-${id}`);
+  if (el) {
+    el.classList.add("hiding");
+    setTimeout(() => {
+      state.notifications = state.notifications.filter((n) => n.id !== id);
+      renderNotifications();
+    }, 300);
+  }
+}
+
+function renderNotifications() {
+  let container = document.getElementById("notifications-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "notifications-container";
+    container.className = "fixed top-4 right-4 z-[9999] space-y-2";
+    document.body.appendChild(container);
+  }
+  container.innerHTML = state.notifications
+    .map(
+      (n) => `
+        <div id="notification-${
+          n.id
+        }" class="notification-toast bg-gray-900 border ${
+        n.type === "success"
+          ? "border-green-500"
+          : n.type === "warning"
+          ? "border-yellow-500"
+          : n.type === "error"
+          ? "border-red-500"
+          : "border-red-500"
+      } rounded-xl p-4 shadow-2xl max-w-sm">
+            <div class="flex items-start space-x-3">
+                <div class="${
+                  n.type === "success"
+                    ? "text-green-500"
+                    : n.type === "warning"
+                    ? "text-yellow-500"
+                    : "text-red-500"
+                }">
+                    ${
+                      n.type === "success"
+                        ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+                        : n.type === "warning"
+                        ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>'
+                        : '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>'
+                    }
+                </div>
+                <div class="flex-1">
+                    <p class="text-white font-semibold text-sm">${n.title}</p>
+                    <p class="text-gray-400 text-xs mt-1">${n.message}</p>
+                </div>
+                <button onclick="removeNotification(${
+                  n.id
+                })" class="text-gray-500 hover:text-white">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    `
+    )
+    .join("");
+}
+
+function updatePageTitle() {
+  const myCards = state.cards.filter(
+    (c) =>
+      c.column !== "concluido" && (c.assignedTo || []).includes(state.user?.uid)
+  );
+  const lateCards = myCards.filter((c) => isLate(c.deadline));
+  if (lateCards.length > 0) {
+    document.title = `(${lateCards.length} atrasada${
+      lateCards.length > 1 ? "s" : ""
+    }) Hawks - Treinamentos`;
+  } else if (myCards.length > 0) {
+    document.title = `(${myCards.length}) Hawks - Treinamentos`;
+  } else {
+    document.title = "Hawks - Treinamentos";
+  }
+}
+
+function checkDeadlineReminders() {
+  if (!state.user || !state.userData?.approved) return;
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const myCards = state.cards.filter(
+    (c) =>
+      c.column !== "concluido" &&
+      (c.assignedTo || []).includes(state.user.uid) &&
+      c.deadline
+  );
+  myCards.forEach((card) => {
+    const deadline = new Date(card.deadline);
+    const reminderKey = `reminder-${card.id}-${deadline.toDateString()}`;
+    if (
+      deadline > now &&
+      deadline < tomorrow &&
+      !localStorage.getItem(reminderKey)
+    ) {
+      showNotification(
+        "⏰ Prazo se aproximando!",
+        `"${card.title}" vence ${formatDeadline(card.deadline)}`,
+        "warning"
+      );
+      localStorage.setItem(reminderKey, "true");
+    }
+  });
+}
+
 const COLUMNS = [
-  { id: "projetos", name: "PROJETOS", color: "bg-red-600" },
-  { id: "mecanica", name: "MECÂNICA", color: "bg-gray-700" },
-  { id: "eletrica", name: "ELÉTRICA", color: "bg-red-700" },
-  { id: "programacao", name: "PROGRAMAÇÃO", color: "bg-gray-800" },
-  { id: "concluido", name: "CONCLUÍDO", color: "bg-green-700" },
+  {
+    id: "projetos",
+    name: "PROJETOS",
+    color: "bg-red-600",
+    borderColor: "border-red-500",
+  },
+  {
+    id: "mecanica",
+    name: "MECÂNICA",
+    color: "bg-gray-700",
+    borderColor: "border-gray-500",
+  },
+  {
+    id: "eletrica",
+    name: "ELÉTRICA",
+    color: "bg-red-700",
+    borderColor: "border-red-600",
+  },
+  {
+    id: "programacao",
+    name: "PROGRAMAÇÃO",
+    color: "bg-gray-800",
+    borderColor: "border-blue-500",
+  },
+  {
+    id: "concluido",
+    name: "CONCLUÍDO",
+    color: "bg-green-700",
+    borderColor: "border-green-500",
+  },
 ];
 
 const LABELS = [
@@ -56,6 +231,16 @@ const TIPOS_MECANICA = [
 const HAWK_LOGO_URL =
   "https://res.cloudinary.com/dn6yal7sp/image/upload/v1766111739/logo_lkaein.jpg";
 const HAWK_LOGO = `<img src="${HAWK_LOGO_URL}" alt="Hawks Logo" class="w-full h-full object-contain rounded-full">`;
+
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", state.theme);
+  localStorage.setItem("theme", state.theme);
+}
+
+function toggleTheme() {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  applyTheme();
+}
 
 function isLate(deadline) {
   if (!deadline) return false;
@@ -93,6 +278,29 @@ function formatDateTime(timestamp) {
   }
 }
 
+function formatCommentDate(timestamp) {
+  if (!timestamp) return "";
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return "";
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return "agora";
+    if (diffMins < 60) return `há ${diffMins}min`;
+    if (diffHours < 24) return `há ${diffHours}h`;
+    if (diffDays < 7) return `há ${diffDays}d`;
+    return date.toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+    });
+  } catch (e) {
+    return "";
+  }
+}
+
 function getErrorMessage(code) {
   const messages = {
     "auth/user-not-found": "Usuário não encontrado.",
@@ -115,6 +323,60 @@ function getAttachmentIcon(type) {
   return icons[type] || icons.raw;
 }
 
+function getFilteredCards() {
+  let filtered = [...state.cards];
+  if (state.searchQuery) {
+    const query = state.searchQuery.toLowerCase();
+    filtered = filtered.filter(
+      (card) =>
+        card.title?.toLowerCase().includes(query) ||
+        card.description?.toLowerCase().includes(query)
+    );
+  }
+  if (state.filters.assignee) {
+    filtered = filtered.filter((card) =>
+      (card.assignedTo || []).includes(state.filters.assignee)
+    );
+  }
+  if (state.filters.label) {
+    filtered = filtered.filter((card) => card.label === state.filters.label);
+  }
+  if (state.filters.late) {
+    filtered = filtered.filter(
+      (card) => card.column !== "concluido" && isLate(card.deadline)
+    );
+  }
+  return filtered;
+}
+
+function clearFilters() {
+  state.searchQuery = "";
+  state.filters = { assignee: "", label: "", late: false, column: "" };
+  render();
+}
+
+function handleSearchKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    state.searchQuery = event.target.value;
+    render();
+  }
+}
+
+function updateSearch(value) {
+  state.searchQuery = value;
+  render();
+}
+
+function updateFilter(key, value) {
+  if (key === "late") {
+    state.filters.late = !state.filters.late;
+  } else {
+    state.filters[key] = value;
+  }
+  render();
+}
+
 function render() {
   const app = document.getElementById("app");
   switch (state.currentView) {
@@ -133,6 +395,7 @@ function render() {
     case "kanban":
       app.innerHTML = renderKanban();
       setupKanbanListeners();
+      setupDragAndDrop();
       break;
     case "admin":
       app.innerHTML = renderAdmin();
@@ -155,27 +418,31 @@ function renderLoading() {
 
 function renderLogin() {
   return `
-        <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-black p-4">
-            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-md card-shadow">
-                <div class="text-center mb-8">
-                    <div class="w-20 h-20 mx-auto mb-4">${HAWK_LOGO}</div>
-                    <h1 class="text-3xl font-bold text-white">Hawks</h1>
-                    <p class="text-red-500 font-semibold">Treinamentos</p>
+        <div class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+            <div class="floating-shapes"></div>
+            <div class="absolute inset-0 bg-gradient-to-br from-red-900/20 via-transparent to-transparent"></div>
+            <div class="glass rounded-3xl p-10 w-full max-w-md card-shadow relative z-10 border border-gray-700/50">
+                <div class="absolute -top-20 -right-20 w-40 h-40 bg-red-500/20 rounded-full blur-3xl"></div>
+                <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-red-500/10 rounded-full blur-3xl"></div>
+                <div class="text-center mb-10 relative">
+                    <div class="w-24 h-24 mx-auto mb-6 rounded-full overflow-hidden ring-4 ring-red-500/30 shadow-2xl shadow-red-500/20">${HAWK_LOGO}</div>
+                    <h1 class="text-4xl font-bold text-white tracking-tight">Hawks</h1>
+                    <p class="text-red-500 font-bold tracking-widest uppercase text-sm mt-1">Treinamentos</p>
                 </div>
-                <form id="loginForm" class="space-y-4">
+                <form id="loginForm" class="space-y-5 relative">
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Email</label>
-                        <input type="email" id="loginEmail" required class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition" placeholder="seu@email.com">
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">Email</label>
+                        <input type="email" id="loginEmail" required class="w-full px-5 py-4 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-300 backdrop-blur-sm" placeholder="seu@email.com">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Senha</label>
-                        <input type="password" id="loginPassword" required class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition" placeholder="••••••••">
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">Senha</label>
+                        <input type="password" id="loginPassword" required class="w-full px-5 py-4 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-300 backdrop-blur-sm" placeholder="••••••••">
                     </div>
-                    <div id="loginError" class="text-red-500 text-sm hidden"></div>
-                    <button type="submit" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition transform hover:scale-[1.02] active:scale-[0.98]">Entrar</button>
+                    <div id="loginError" class="text-red-400 text-sm hidden bg-red-500/10 border border-red-500/30 rounded-lg p-3"></div>
+                    <button type="submit" class="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-red-500/30 hover:shadow-red-500/50 text-lg">Entrar</button>
                 </form>
-                <div class="mt-6 text-center">
-                    <p class="text-gray-400">Não tem conta? <button onclick="navigate('register')" class="text-red-500 hover:text-red-400 font-medium">Cadastre-se</button></p>
+                <div class="mt-8 text-center relative">
+                    <p class="text-gray-400">Não tem conta? <button onclick="navigate('register')" class="text-red-400 hover:text-red-300 font-bold transition-colors">Cadastre-se</button></p>
                 </div>
             </div>
         </div>
@@ -184,31 +451,35 @@ function renderLogin() {
 
 function renderRegister() {
   return `
-        <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-950 via-gray-900 to-black p-4">
-            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-md card-shadow">
-                <div class="text-center mb-8">
-                    <div class="w-20 h-20 mx-auto mb-4">${HAWK_LOGO}</div>
-                    <h1 class="text-3xl font-bold text-white">Criar Conta</h1>
+        <div class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+            <div class="floating-shapes"></div>
+            <div class="absolute inset-0 bg-gradient-to-br from-red-900/20 via-transparent to-transparent"></div>
+            <div class="glass rounded-3xl p-10 w-full max-w-md card-shadow relative z-10 border border-gray-700/50">
+                <div class="absolute -top-20 -right-20 w-40 h-40 bg-red-500/20 rounded-full blur-3xl"></div>
+                <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-red-500/10 rounded-full blur-3xl"></div>
+                <div class="text-center mb-8 relative">
+                    <div class="w-24 h-24 mx-auto mb-6 rounded-full overflow-hidden ring-4 ring-red-500/30 shadow-2xl shadow-red-500/20">${HAWK_LOGO}</div>
+                    <h1 class="text-3xl font-bold text-white tracking-tight">Criar Conta</h1>
                     <p class="text-gray-400 mt-2">Junte-se à equipe Hawks</p>
                 </div>
-                <form id="registerForm" class="space-y-4">
+                <form id="registerForm" class="space-y-4 relative">
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Nome Completo</label>
-                        <input type="text" id="registerName" required class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition" placeholder="Seu nome">
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">Nome Completo</label>
+                        <input type="text" id="registerName" required class="w-full px-5 py-4 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-300 backdrop-blur-sm" placeholder="Seu nome">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Email</label>
-                        <input type="email" id="registerEmail" required class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition" placeholder="seu@email.com">
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">Email</label>
+                        <input type="email" id="registerEmail" required class="w-full px-5 py-4 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-300 backdrop-blur-sm" placeholder="seu@email.com">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-300 mb-2">Senha</label>
-                        <input type="password" id="registerPassword" required minlength="6" class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition" placeholder="Mínimo 6 caracteres">
+                        <label class="block text-sm font-semibold text-gray-300 mb-2">Senha</label>
+                        <input type="password" id="registerPassword" required minlength="6" class="w-full px-5 py-4 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-300 backdrop-blur-sm" placeholder="Mínimo 6 caracteres">
                     </div>
-                    <div id="registerError" class="text-red-500 text-sm hidden"></div>
-                    <button type="submit" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition transform hover:scale-[1.02] active:scale-[0.98]">Cadastrar</button>
+                    <div id="registerError" class="text-red-400 text-sm hidden bg-red-500/10 border border-red-500/30 rounded-lg p-3"></div>
+                    <button type="submit" class="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-red-500/30 hover:shadow-red-500/50 text-lg">Cadastrar</button>
                 </form>
-                <div class="mt-6 text-center">
-                    <p class="text-gray-400">Já tem conta? <button onclick="navigate('login')" class="text-red-500 hover:text-red-400 font-medium">Faça login</button></p>
+                <div class="mt-8 text-center relative">
+                    <p class="text-gray-400">Já tem conta? <button onclick="navigate('login')" class="text-red-400 hover:text-red-300 font-bold transition-colors">Faça login</button></p>
                 </div>
             </div>
         </div>
@@ -242,39 +513,46 @@ function renderPending() {
 function renderKanban() {
   const isAdmin =
     state.userData?.role === "admin" || state.userData?.role === "creator";
+  const hasActiveFilters =
+    state.searchQuery ||
+    state.filters.assignee ||
+    state.filters.label ||
+    state.filters.late;
+
   return `
-        <div class="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-black">
-            <header class="bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 sticky top-0 z-40">
-                <div class="max-w-full mx-auto px-4 py-3">
+        <div class="min-h-screen">
+            <div class="floating-shapes"></div>
+            <header class="glass border-b border-gray-700/50 sticky top-0 z-40 shadow-2xl">
+                <div class="max-w-full mx-auto px-6 py-4">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10">${HAWK_LOGO}</div>
+                        <div class="flex items-center space-x-4">
+                            <div class="w-12 h-12 rounded-full overflow-hidden ring-2 ring-red-500/30 shadow-lg shadow-red-500/20">${HAWK_LOGO}</div>
                             <div>
-                                <h1 class="text-xl font-bold text-white">Hawks</h1>
-                                <p class="text-xs text-red-500 font-semibold">Treinamentos</p>
+                                <h1 class="text-2xl font-bold text-white tracking-tight">Hawks</h1>
+                                <p class="text-xs text-red-500 font-bold tracking-widest uppercase">Treinamentos</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-3">
                             ${
                               isAdmin
                                 ? `
-                                <button onclick="navigate('admin')" class="flex items-center space-x-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition">
+                                <button onclick="navigate('admin')" class="relative flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white rounded-xl transition-all duration-300 shadow-lg shadow-red-500/25 hover:shadow-red-500/40 hover:scale-105">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                                     </svg>
-                                    <span class="hidden sm:inline">Admin</span>
+                                    <span class="hidden sm:inline font-semibold">Admin</span>
                                     ${
                                       state.pendingUsers.length > 0
-                                        ? `<span class="bg-white text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">${state.pendingUsers.length}</span>`
+                                        ? `<span class="absolute -top-1 -right-1 bg-white text-red-600 text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-lg animate-pulse">${state.pendingUsers.length}</span>`
                                         : ""
                                     }
                                 </button>
-                                <button onclick="openCreateCardModal()" class="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition">
+                                <button onclick="openCreateCardModal()" class="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 text-white rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl border border-gray-600/50 hover:border-gray-500/50 hover:scale-105">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                                     </svg>
-                                    <span class="hidden sm:inline">Nova Tarefa</span>
+                                    <span class="hidden sm:inline font-semibold">Nova Tarefa</span>
                                 </button>
                             `
                                 : ""
@@ -298,6 +576,63 @@ function renderKanban() {
                     </div>
                 </div>
             </header>
+            <div class="px-4 py-3 glass border-b border-gray-700/30">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative flex-1 min-w-[200px] max-w-md">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input type="text" id="searchInput" placeholder="Buscar tarefas... (Enter para buscar)" value="${
+                          state.searchQuery
+                        }" onkeydown="handleSearchKeydown(event)" class="w-full pl-10 pr-4 py-2.5 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/50 transition">
+                    </div>
+                    <select onchange="updateFilter('assignee', this.value)" class="px-4 py-2.5 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:border-red-500 transition">
+                        <option value="">Todos responsáveis</option>
+                        ${state.users
+                          .filter((u) => u.approved)
+                          .map(
+                            (u) =>
+                              `<option value="${u.id}" ${
+                                state.filters.assignee === u.id
+                                  ? "selected"
+                                  : ""
+                              }>${u.name}</option>`
+                          )
+                          .join("")}
+                    </select>
+                    <select onchange="updateFilter('label', this.value)" class="px-4 py-2.5 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white focus:outline-none focus:border-red-500 transition">
+                        <option value="">Todas etiquetas</option>
+                        ${LABELS.map(
+                          (l) =>
+                            `<option value="${l.id}" ${
+                              state.filters.label === l.id ? "selected" : ""
+                            }>${l.name}</option>`
+                        ).join("")}
+                    </select>
+                    <button onclick="updateFilter('late')" class="${
+                      state.filters.late
+                        ? "bg-red-600 text-white"
+                        : "bg-gray-800/50 text-gray-300"
+                    } px-4 py-2.5 border border-gray-600/50 rounded-xl hover:bg-red-600 hover:text-white transition flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span>Atrasados</span>
+                    </button>
+                    ${
+                      hasActiveFilters
+                        ? `
+                        <button onclick="clearFilters()" class="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl transition flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                            <span>Limpar</span>
+                        </button>
+                    `
+                        : ""
+                    }
+                </div>
+            </div>
             <main class="p-4 overflow-x-auto">
                 <div class="flex space-x-4 min-w-max pb-4">
                     ${COLUMNS.map((col) => renderColumn(col)).join("")}
@@ -438,26 +773,44 @@ function renderKanban() {
 }
 
 function renderColumn(column) {
-  const columnCards = state.cards.filter((c) => c.column === column.id);
+  const filteredCards = getFilteredCards();
+  const columnCards = filteredCards.filter((c) => c.column === column.id);
+  const isAdmin =
+    state.userData?.role === "admin" || state.userData?.role === "creator";
+
   return `
-        <div class="w-72 flex-shrink-0">
-            <div class="bg-gray-900/50 rounded-xl border border-gray-800 overflow-hidden h-[calc(100vh-140px)] flex flex-col">
-                <div class="${column.color} px-4 py-3 flex-shrink-0">
-                    <div class="flex items-center justify-between">
-                        <h2 class="font-bold text-white text-sm">${
+        <div class="w-80 flex-shrink-0">
+            <div class="glass rounded-2xl border border-gray-700/50 overflow-hidden h-[calc(100vh-200px)] flex flex-col shadow-2xl column-drop-zone" data-column="${
+              column.id
+            }">
+                <div class="${
+                  column.color
+                } px-5 py-4 flex-shrink-0 relative overflow-hidden">
+                    <div class="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent"></div>
+                    <div class="flex items-center justify-between relative z-10">
+                        <h2 class="font-bold text-white text-sm tracking-wide">${
                           column.name
                         }</h2>
-                        <span class="bg-white/20 text-white text-xs font-bold px-2 py-1 rounded-full">${
+                        <span class="bg-white/25 backdrop-blur-sm text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-inner">${
                           columnCards.length
                         }</span>
                     </div>
                 </div>
-                <div class="p-2 space-y-2 flex-1 overflow-y-auto scrollbar-thin">
+                <div class="p-3 space-y-3 flex-1 overflow-y-auto scrollbar-thin" data-column="${
+                  column.id
+                }">
                     ${
                       columnCards.length === 0
-                        ? `<div class="text-center py-8 text-gray-500 text-sm">Nenhuma tarefa</div>`
+                        ? `
+                        <div class="text-center py-12 text-gray-500">
+                            <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            <p class="text-sm font-medium">Nenhuma tarefa</p>
+                        </div>
+                    `
                         : columnCards
-                            .map((card) => renderCard(card, column.id))
+                            .map((card) => renderCard(card, column))
                             .join("")
                     }
                 </div>
@@ -466,7 +819,7 @@ function renderColumn(column) {
     `;
 }
 
-function renderCard(card, columnId) {
+function renderCard(card, column) {
   const assignees = (card.assignedTo || [])
     .map((id) => state.users.find((u) => u.id === id))
     .filter(Boolean);
@@ -478,45 +831,51 @@ function renderCard(card, columnId) {
   const totalAttachments =
     (card.initialAttachments?.length || 0) +
     (card.userAttachments?.length || 0);
-  const isCompleted = columnId === "concluido";
+  const totalComments = card.comments?.length || 0;
+  const isCompleted = column.id === "concluido";
+  const isAdmin =
+    state.userData?.role === "admin" || state.userData?.role === "creator";
 
   return `
-        <div onclick="openCardModal('${
-          card.id
-        }')" class="bg-gray-800 rounded-lg p-3 cursor-pointer hover:bg-gray-750 transition border border-gray-700 hover:border-red-500/50 card-shadow fade-in ${
-    late ? "border-l-4 border-l-red-500" : ""
-  } ${isCompleted ? "border-l-4 border-l-green-500" : ""}">
-            <div class="flex items-start justify-between mb-2">
-                <div class="flex flex-wrap gap-1">
+        <div onclick="openCardModal('${card.id}')" 
+             draggable="${isAdmin}" 
+             data-card-id="${card.id}"
+             class="glass-card rounded-xl p-4 cursor-pointer border-l-4 ${
+               column.borderColor
+             } hover:border-l-red-500 fade-in ${late ? "card-late" : ""} ${
+    isCompleted ? "card-done" : ""
+  }" style="border-left-width: 4px;">
+            <div class="flex items-start justify-between mb-3">
+                <div class="flex flex-wrap gap-1.5">
                     ${
                       isCompleted
                         ? `
-                        <span class="bg-green-500 text-xs font-medium px-2 py-0.5 rounded text-white flex items-center">
+                        <span class="bg-gradient-to-r from-green-500 to-green-600 text-xs font-semibold px-2.5 py-1 rounded-full text-white flex items-center shadow-lg shadow-green-500/20">
                             <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                             Concluído
                         </span>
                     `
-                        : `<span class="${label.color} text-xs font-medium px-2 py-0.5 rounded text-white">${label.name}</span>`
+                        : `<span class="${label.color} text-xs font-semibold px-2.5 py-1 rounded-full text-white shadow-lg">${label.name}</span>`
                     }
                     ${
-                      columnId === "mecanica" && tipoMecanica
-                        ? `<span class="${tipoMecanica.color} text-xs font-medium px-2 py-0.5 rounded text-white">${tipoMecanica.name}</span>`
+                      column.id === "mecanica" && tipoMecanica
+                        ? `<span class="${tipoMecanica.color} text-xs font-semibold px-2.5 py-1 rounded-full text-white shadow-lg">${tipoMecanica.name}</span>`
                         : ""
                     }
                     ${
                       late
-                        ? `<span class="bg-red-600 text-xs font-medium px-2 py-0.5 rounded text-white late-badge">ATRASADO</span>`
+                        ? `<span class="bg-gradient-to-r from-red-500 to-red-600 text-xs font-bold px-2.5 py-1 rounded-full text-white late-badge shadow-lg shadow-red-500/30">⚠ ATRASADO</span>`
                         : ""
                     }
                 </div>
             </div>
-            <h3 class="font-semibold text-white text-sm mb-2 line-clamp-2">${
+            <h3 class="font-bold text-white text-sm mb-2 line-clamp-2 leading-tight">${
               card.title
             }</h3>
             ${
-              columnId === "projetos" && card.areasEnvolvidas?.length > 0
+              column.id === "projetos" && card.areasEnvolvidas?.length > 0
                 ? `
                 <div class="flex flex-wrap gap-1 mb-2">
                     ${card.areasEnvolvidas
@@ -554,6 +913,18 @@ function renderCard(card, columnId) {
                 </div>
                 <div class="flex items-center space-x-2 flex-shrink-0">
                     ${
+                      totalComments > 0
+                        ? `
+                        <span class="flex items-center">
+                            <svg class="w-3 h-3 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                            ${totalComments}
+                        </span>
+                    `
+                        : ""
+                    }
+                    ${
                       totalAttachments > 0
                         ? `
                         <span class="flex items-center">
@@ -569,6 +940,69 @@ function renderCard(card, columnId) {
             </div>
         </div>
     `;
+}
+
+function setupDragAndDrop() {
+  const isAdmin =
+    state.userData?.role === "admin" || state.userData?.role === "creator";
+  if (!isAdmin) return;
+
+  const cards = document.querySelectorAll("[data-card-id]");
+  const columns = document.querySelectorAll("[data-column]");
+
+  cards.forEach((card) => {
+    card.addEventListener("dragstart", (e) => {
+      state.draggedCard = e.target.dataset.cardId;
+      e.target.classList.add("dragging");
+      setTimeout(() => (e.target.style.opacity = "0.5"), 0);
+    });
+
+    card.addEventListener("dragend", (e) => {
+      e.target.classList.remove("dragging");
+      e.target.style.opacity = "1";
+      state.draggedCard = null;
+      columns.forEach((col) => col.classList.remove("drag-over"));
+    });
+  });
+
+  columns.forEach((column) => {
+    column.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      column.classList.add("drag-over");
+    });
+
+    column.addEventListener("dragleave", (e) => {
+      column.classList.remove("drag-over");
+    });
+
+    column.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      column.classList.remove("drag-over");
+
+      const cardId = state.draggedCard;
+      const newColumn = column.dataset.column;
+
+      if (cardId && newColumn) {
+        try {
+          const updateData = {
+            column: newColumn,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          };
+
+          if (newColumn === "concluido") {
+            updateData.done = true;
+            updateData.label = null;
+            updateData.completedAt =
+              firebase.firestore.FieldValue.serverTimestamp();
+          }
+
+          await db.collection("cards").doc(cardId).update(updateData);
+        } catch (error) {
+          alert("Erro ao mover tarefa.");
+        }
+      }
+    });
+  });
 }
 
 function renderCardModalContent(card) {
@@ -793,6 +1227,80 @@ function renderCardModalContent(card) {
                     `
                         : '<p class="text-gray-500 text-sm">Nenhum anexo adicionado</p>'
                     }
+                </div>
+                <div class="mb-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-xs font-medium text-gray-400 flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                            Comentários (${(card.comments || []).length})
+                        </h3>
+                    </div>
+                    ${
+                      isAdmin
+                        ? `
+                        <div class="mb-3">
+                            <div class="flex space-x-2">
+                                <input type="text" id="commentInput" placeholder="Escreva um comentário..." class="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-red-500">
+                                <button onclick="addComment('${card.id}')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    `
+                        : ""
+                    }
+                    <div class="space-y-2 max-h-48 overflow-y-auto scrollbar-thin">
+                        ${
+                          (card.comments || []).length > 0
+                            ? (card.comments || [])
+                                .slice()
+                                .reverse()
+                                .map(
+                                  (comment) => `
+                            <div class="bg-gray-800 rounded-lg p-3">
+                                <div class="flex items-start justify-between mb-1">
+                                    <div class="flex items-center space-x-2">
+                                        <div class="w-6 h-6 bg-red-500/20 rounded-full flex items-center justify-center">
+                                            <span class="text-red-500 text-xs font-bold">${
+                                              comment.authorName
+                                                ?.charAt(0)
+                                                ?.toUpperCase() || "?"
+                                            }</span>
+                                        </div>
+                                        <span class="text-white text-sm font-medium">${
+                                          comment.authorName || "Admin"
+                                        }</span>
+                                        <span class="text-gray-500 text-xs">${formatCommentDate(
+                                          comment.createdAt
+                                        )}</span>
+                                    </div>
+                                    ${
+                                      isAdmin &&
+                                      comment.authorId === state.user?.uid
+                                        ? `
+                                        <button onclick="deleteComment('${card.id}', '${comment.id}')" class="text-gray-500 hover:text-red-500 transition">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                            </svg>
+                                        </button>
+                                    `
+                                        : ""
+                                    }
+                                </div>
+                                <p class="text-gray-300 text-sm pl-8">${
+                                  comment.text
+                                }</p>
+                            </div>
+                        `
+                                )
+                                .join("")
+                            : '<p class="text-gray-500 text-sm text-center py-4">Nenhum comentário ainda</p>'
+                        }
+                    </div>
                 </div>
                 ${
                   isAdmin
@@ -1626,6 +2134,45 @@ async function deleteCard(cardId) {
   }
 }
 
+async function addComment(cardId) {
+  const input = document.getElementById("commentInput");
+  const text = input?.value?.trim();
+  if (!text) return;
+  try {
+    const card = state.cards.find((c) => c.id === cardId);
+    const comments = card.comments || [];
+    const newComment = {
+      id: Date.now().toString(),
+      text: text,
+      authorId: state.user.uid,
+      authorName: state.userData.name,
+      createdAt: new Date().toISOString(),
+    };
+    comments.push(newComment);
+    await db.collection("cards").doc(cardId).update({
+      comments: comments,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    input.value = "";
+  } catch (error) {
+    alert("Erro ao adicionar comentário.");
+  }
+}
+
+async function deleteComment(cardId, commentId) {
+  if (!confirm("Excluir este comentário?")) return;
+  try {
+    const card = state.cards.find((c) => c.id === cardId);
+    const comments = (card.comments || []).filter((c) => c.id !== commentId);
+    await db.collection("cards").doc(cardId).update({
+      comments: comments,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    alert("Erro ao excluir comentário.");
+  }
+}
+
 function triggerCreateFileUpload() {
   document.getElementById("createFileInput").click();
 }
@@ -1878,11 +2425,57 @@ async function removeUser(userId) {
 function setupRealtimeListeners() {
   state.unsubscribers.forEach((unsub) => unsub());
   state.unsubscribers = [];
+  initNotificationSound();
   const cardsUnsub = db
     .collection("cards")
     .orderBy("createdAt", "desc")
     .onSnapshot((snapshot) => {
+      const oldCards = [...state.cards];
       state.cards = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      snapshot.docChanges().forEach((change) => {
+        const card = { id: change.doc.id, ...change.doc.data() };
+        if (change.type === "added" && oldCards.length > 0) {
+          if ((card.assignedTo || []).includes(state.user?.uid)) {
+            showNotification(
+              "📋 Nova tarefa atribuída!",
+              `Você foi atribuído à tarefa "${card.title}"`,
+              "info"
+            );
+          }
+        }
+        if (change.type === "modified") {
+          const oldCard = oldCards.find((c) => c.id === card.id);
+          if (oldCard) {
+            const wasAssigned = (oldCard.assignedTo || []).includes(
+              state.user?.uid
+            );
+            const isNowAssigned = (card.assignedTo || []).includes(
+              state.user?.uid
+            );
+            if (!wasAssigned && isNowAssigned) {
+              showNotification(
+                "📋 Nova tarefa atribuída!",
+                `Você foi atribuído à tarefa "${card.title}"`,
+                "info"
+              );
+            }
+            if (oldCard.column !== "concluido" && card.column === "concluido") {
+              const isAdmin =
+                state.userData?.role === "admin" ||
+                state.userData?.role === "creator";
+              if (isAdmin) {
+                showNotification(
+                  "✅ Tarefa concluída!",
+                  `"${card.title}" foi marcada como concluída`,
+                  "success"
+                );
+              }
+            }
+          }
+        }
+      });
+      updatePageTitle();
+      checkDeadlineReminders();
       if (state.selectedCard) {
         const updatedCard = state.cards.find(
           (c) => c.id === state.selectedCard.id
@@ -1931,6 +2524,7 @@ auth.onAuthStateChanged(async (user) => {
       } else {
         setupRealtimeListeners();
         navigate("kanban");
+        setInterval(checkDeadlineReminders, 60000);
       }
     } else {
       const usersCount = (await db.collection("users").limit(1).get()).size;
@@ -1949,6 +2543,7 @@ auth.onAuthStateChanged(async (user) => {
       if (state.userData.approved) {
         setupRealtimeListeners();
         navigate("kanban");
+        setInterval(checkDeadlineReminders, 60000);
       } else {
         navigate("pending");
       }
@@ -1956,6 +2551,7 @@ auth.onAuthStateChanged(async (user) => {
   } else {
     state.user = null;
     state.userData = null;
+    document.title = "Hawks - Treinamentos";
     navigate("login");
   }
 });
